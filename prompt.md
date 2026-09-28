@@ -18,7 +18,9 @@ Two prompt variants exist:
 ## Endpoint (class-provided)
 
 - **Base URL:** `http://dobolyi.com:9001/v1`
-- **API key:** `6418`
+- **API key:** `6418` (class-provided; `review_classifier.py` reads
+  `MBAX6418_API_KEY` from the environment first and falls back to this default,
+  so the key never has to be hardcoded in a checkout)
 - **Model:** `cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit`
 - **Sampling:** `temperature: 0` (deterministic)
 

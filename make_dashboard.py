@@ -74,6 +74,21 @@ def load_first100(path: str) -> list[dict]:
     return rows
 
 
+def load_first100_3class(path: str) -> dict:
+    """Aggregate (not rows) for the 3-class re-score of the first 100 reviews."""
+    n = correct = 0
+    gt: dict[str, int] = {"POSITIVE": 0, "NEUTRAL": 0, "NEGATIVE": 0}
+    with open(path, encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            if not r.get("predicted"):
+                continue
+            n += 1
+            gt[r["ground_truth"]] = gt.get(r["ground_truth"], 0) + 1
+            if r["correct"] == "True":
+                correct += 1
+    return {"correct": correct, "n": n, **{f"gt_{k}": v for k, v in gt.items()}}
+
+
 def load_stats(path: str) -> dict:
     with open(path, encoding="utf-8") as f:
         s = json.load(f)
@@ -152,7 +167,7 @@ TEMPLATE = r"""<!DOCTYPE html>
   .chip b{color:var(--accent-ink);}
 
   /* ---------- hero tiles ---------- */
-  .tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:16px; margin-bottom:26px;}
+  .tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-bottom:26px;}
   .tile{background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:20px 22px; box-shadow:var(--shadow);}
   .tile .label{font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.7px; color:var(--muted);}
   .tile .value{font-size:38px; font-weight:800; letter-spacing:-1px; margin-top:8px; font-variant-numeric:tabular-nums;}
@@ -331,8 +346,10 @@ TEMPLATE = r"""<!DOCTYPE html>
         <h3 class="sec-head" style="margin-bottom:14px">Balanced sample <span class="hint">50 per class, fixed seed</span></h3>
         <div id="balStack" class="stack"></div>
         <div id="balLabels" class="stack labels"></div>
-        <div class="callout warn"><b>&#9888; What balancing revealed:</b> overall accuracy drops from <b id="imbAcc">–</b> (first-100, 93% positive)
-          to <b id="balAcc">–</b> on the balanced sample. ★3 “neutral” reviews are the model's weak spot — see the confusion matrix below.</div>
+        <div class="callout warn"><b>&#9888; What balancing revealed:</b> overall accuracy drops from <b id="imbAcc">–</b> (first-100, binary prompt)
+          to <b id="balAcc">–</b> on the balanced sample. The same 100 reviews re-scored with the 3-class prompt stay at <b id="f3Acc">–</b>
+          — only <b id="f3Neu">–</b> of them are ★3 — so the gap comes from the sampling, not from adding the neutral class.
+          ★3 “neutral” reviews are the model's weak spot — see the confusion matrix below.</div>
       </div>
     </div>
   </section>
@@ -353,6 +370,12 @@ TEMPLATE = r"""<!DOCTYPE html>
         <div class="legend"><span class="dot" style="background:var(--accent)"></span>recall (of true X, how many called X)
           <span class="dot" style="background:var(--neu)"></span>precision (of predicted X, how many truly X)</div>
       </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h3 class="sec-head" style="margin-bottom:14px">Ground truth vs. predicted <span class="hint">balanced run — same 150 reviews, per class</span></h3>
+      <div id="gtPredBars"></div>
+      <div class="legend"><span class="dot" style="background:var(--pos-soft)"></span>ground truth count
+        <span class="dot" style="background:var(--pos)"></span>predicted count (per-class color: light = true count, solid = model's label count)</div>
     </div>
   </section>
 
@@ -450,6 +473,7 @@ TEMPLATE = r"""<!DOCTYPE html>
 <script>
 const BAL = __BAL__;
 const FIRST = __FIRST__;
+const FIRST3 = __FIRST3__;
 const STATS = __STATS__;
 const EMO = __EMOTIONS__;
 const EMO_COLORS = __EMOCOLORS__;
@@ -497,8 +521,8 @@ hero.appendChild(tile("neg","NEGATIVE recall", fmtPct(negOk,negN),
   `${negOk}/${negN} · precision ${fmtPct(negOk,negPred)}`,
   `★1–2 reviews: ${negN}/${N} of the sample`));
 hero.appendChild(tile("pos","First-100 run (binary)", fmtPct(firstCorrect,FIRST.length),
-  `${firstCorrect}/${FIRST.length} · 93% POSITIVE in that slice`,
-  `looks great — but the classes it was tested on weren't balanced`));
+  `${firstCorrect}/${FIRST.length} · 3-class re-score ${FIRST3.n ? fmtPct(FIRST3.correct,FIRST3.n) : "—"} (same 100)`,
+  `imbalanced slice — the balanced sample tells a truer story`));
 
 /* ---------- stacked distribution helpers ---------- */
 function stack(el, segs, labelsEl){
@@ -526,6 +550,8 @@ const dsPctHi = (STATS.ratings[4]+STATS.ratings[5])/dsTotal*100;
 $("dsPctHi").textContent = dsPctHi.toFixed(1)+"%";
 $("imbAcc").textContent = fmtPct(firstCorrect,FIRST.length);
 $("balAcc").textContent = fmtPct(correct,N);
+$("f3Acc").textContent = FIRST3.n ? fmtPct(FIRST3.correct, FIRST3.n) : "—";
+$("f3Neu").textContent = FIRST3.n ? FIRST3.gt_NEUTRAL : "–";
 const pctHi = (STATS.ratings[4]+STATS.ratings[5])/dsTotal*100;
 stack($("dsStack"),[
   {v:STATS.ratings[5],c:"#16a34a",label:"5★",name:"★★★★★"},
@@ -572,6 +598,23 @@ CLASSES.forEach(c=>{
     <div class="feat-col"><div class="fc-label">precision ${fmtPct(prec,precN)}</div>${bar(prec,precN,"var(--neu)")}</div>
   </div>`;
 });
+
+/* ---------- ground truth vs predicted (per class) ---------- */
+const gtp = $("gtPredBars");
+const gtpMax = Math.max(posN, neuN, negN, posPred, neuPred, negPred);
+gtp.innerHTML = CLASSES.map(c => {
+  const gt = BAL.filter(r => r.gt === c).length;
+  const pd = BAL.filter(r => r.pred === c).length;
+  const diff = pd - gt;
+  const tag = diff > 0 ? `over-predicted by ${diff}` : diff < 0 ? `under-predicted by ${-diff}` : "in balance";
+  const tagClr = diff > 0 ? "var(--neg)" : diff < 0 ? "var(--neu)" : "var(--muted)";
+  const bar = (v, color) => `<div class="bar-track small">${v === 0 ? "" : `<div class="fill tiny" style="width:${(Math.max(2, v / gtpMax * 100)).toFixed(1)}%;background:${color}" title="${v}"></div>`}</div>`;
+  return `<div class="feat-row">
+    <div class="cls">${c}</div>
+    <div class="feat-col"><div class="fc-label">ground truth — ${gt}</div>${bar(gt, CLS_SOFT[c])}</div>
+    <div class="feat-col"><div class="fc-label">predicted — ${pd} <span style="color:${tagClr};font-weight:700">· ${tag}</span></div>${bar(pd, CLS_COLOR[c])}</div>
+  </div>`;
+}).join("");
 
 /* ---------- emotions ---------- */
 function emoCounts(rows,key){
@@ -631,7 +674,7 @@ Words common in gift-card reviews — <code>gift</code>, <code>perfect</code>, <
 surprise). Ties are therefore the norm: <b>${nrcTies}/${both.length}</b> of the reviews the lexicon could score ended with two
 or more emotions tied on top, and the fixed tie-break (canonical order, anticipation first) resolved <b>${nrcTieAntic}</b> of
 them to <b>anticipation</b> — that tie-break, not any single word "winning", is the main driver of the list's anticipation
-count. Meanwhile the words that actually carry a complaint (<code>damaged</code>, <code>broke</code>) are mostly absent from
+count. Meanwhile the words that actually carry a complaint (<code>damaged</code>, <code>never</code>, <code>works</code>) are mostly absent from
 the lexicon, so negative texts often score nothing at all. The LLM reads the whole review, understands negation, and reports
 the strongest expressed feeling: real complaints read as <b>anger</b> (${llmC["anger"]} reviews) and praise as <b>joy</b>
 (${llmC["joy"]} reviews). Short reviews with no emotion words (e.g. “Four Stars”) get an emotion from the LLM but none from
@@ -761,11 +804,13 @@ renderTable();
 def main() -> None:
     bal = load_balanced("outputs/emotions_balanced.csv")
     first = load_first100("outputs/emotions_100.csv")
+    first3 = load_first100_3class("results_100_3class.csv")
     stats = load_stats("outputs/dataset_stats.json")
 
     out = (
         TEMPLATE.replace("__BAL__", json.dumps(bal, ensure_ascii=False))
         .replace("__FIRST__", json.dumps(first, ensure_ascii=False))
+        .replace("__FIRST3__", json.dumps(first3))
         .replace("__STATS__", json.dumps(stats, ensure_ascii=False))
         .replace("__EMOTIONS__", json.dumps(list(EMOTIONS)))
         .replace(
@@ -797,6 +842,8 @@ def main() -> None:
     print(f"  NEUTRAL collapse: {cn_neg}/{cn} to NEGATIVE, {cn_pos}/{cn} to POSITIVE")
     first_c = sum(1 for r in first if r["correct"])
     print(f"first100: acc {first_c}/{len(first)} = {first_c/len(first)*100:.2f}%")
+    f3c, f3n = first3["correct"], first3["n"]
+    print(f"first100 (3-class re-score): acc {f3c}/{f3n} = {f3c/f3n*100:.2f}%  gt={ {k: v for k, v in first3.items() if k.startswith('gt_')} }")
     both = [r for r in bal if r["nrc_emo"] != "—"]
     agree = sum(1 for r in both if r["llm_emo"] == r["nrc_emo"])
     print(f"emotion agreement: {agree}/{len(both)} = {agree/len(both)*100:.1f}%  (NRC coverage {len(both)}/150)")

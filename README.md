@@ -27,12 +27,15 @@ expandable rows (full text + NRC word scores), and a theme switcher.*
 | Run | Reviews | Classes | Correct | Accuracy |
 |---|---|---|---|---|
 | First 100 rows (in file order) | 100 | POSITIVE / NEGATIVE (binary) | 97 / 100 | **97.0%** |
+| First 100 rows, same reviews, 3-class prompt (re-score) | 100 | POSITIVE / NEUTRAL / NEGATIVE | 95 / 100 | **95.0%** |
 | Balanced sample (seed 6418) | 150 | POSITIVE / NEUTRAL / NEGATIVE | 116 / 150 | **77.3%** |
 
 The first-100 slice is 93% positive (91 five-star reviews), so a classifier that
-mostly says "positive" looks excellent there. On a balanced sample each class carries
-equal weight and the true picture appears: the model is strong on positive and negative
-reviews but weak on **neutral (3-star)** ones.
+mostly says "positive" looks excellent there: **97.0%** under the Step-2 binary
+prompt and still **95.0%** when the same rows are re-scored with the 3-class
+prompt (`run_eval_3class.py`). Only on a balanced sample, where each class
+carries equal weight, does the true picture appear: the model is strong on
+positive and negative reviews but weak on **neutral (3-star)** ones.
 
 ### Balanced run — per-class metrics
 
@@ -63,6 +66,18 @@ The first-100 slice was even more lopsided (91 five-star + 2 four-star = 93% pos
 A model that just copied the majority class would score ~93% on it; the actual run
 scored 97% — only 3 errors out of 100 (2 false negatives on 5★ reviews, 1 false
 positive on a 3★ review). *The headline number was dominated by the easy class.*
+
+Comparing that 97.0% to the balanced 77.3% mixes two changes: the added NEUTRAL
+class and the equal-weight sampling. To separate them, the **same 100 reviews**
+were re-scored with the 3-class prompt used by the balanced run
+(`run_eval_3class.py`, fixed settings). They drop only to **95.0% (95/100)**:
+the third class costs ~2 points because four terse ★5 reviews ("Giftcard", "Love
+it!!", …) get softened to NEUTRAL — but the slice contains just **2 three-star
+reviews**, so the new class is barely exercised. The much larger gap from 95.0%
+to **77.3%** is therefore the sampling: on a balanced sample the ★3 class the
+model handles worst (recall 40%) weighs exactly as much as the two easy ones.
+(The re-score is a single run; like the balanced run it can shift a label or two
+if re-run — see the determinism note under Reproducibility.)
 
 Balancing the sample (50 per class, fixed seed) dropped overall accuracy to **77.3%**.
 Per-class recall shows where the loss came from: NEUTRAL recall **40%** vs
@@ -256,8 +271,9 @@ used for the word-list emotion detector:
 ## Reproducibility
 
 - **Fixed sample:** `run_balanced.py --seed 6418 --per-class 50` picks the same
-  150 reviews (50 per class) every run; the first-100 run reads the file's first
-  100 rows in order (also fixed).
+  150 reviews (50 per class) every run; the first-100 runs read the file's first
+  100 rows in order (also fixed), and `run_eval_3class.py` re-scores exactly those
+  rows with the 3-class prompt.
 - **Fixed model settings:** temperature 0, model `cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit`.
 - **Honesty note on determinism:** the balanced run was executed twice
   independently with the same seed and settings. Overall accuracy was
@@ -270,9 +286,9 @@ used for the word-list emotion detector:
   by one or two counts if you re-run; all numbers in this report come from the
   committed snapshot (`results_balanced.csv`).
 - **Saved artifacts** (committed): raw API responses — the model's verbatim
-  output per review (`outputs/balanced_raw.jsonl`), parsed results
-  (`results_*.csv`), NRC-scored emotions (`outputs/emotions_*.csv`), data
-  distribution (`outputs/dataset_stats.json`), and the generated dashboard
+  output per review (`outputs/balanced_raw.jsonl`, `outputs/first100_3class_raw.jsonl`),
+  parsed results (`results_*.csv`), NRC-scored emotions (`outputs/emotions_*.csv`),
+  data distribution (`outputs/dataset_stats.json`), and the generated dashboard
   (`dashboard.html`).
 - Every number quoted in this report is a figure you can re-derive from those files.
 
@@ -281,8 +297,9 @@ used for the word-list emotion detector:
 | File | Role |
 |---|---|
 | `prompt.md` | The reusable classification prompts (binary + full JSON) |
-| `review_classifier.py` | LLM client: binary and full (sentiment+emotion) modes |
+| `review_classifier.py` | LLM client: binary and full (sentiment+emotion) modes; API key from `MBAX6418_API_KEY` env var (class default fallback) |
 | `run_eval.py` | Step 2 script — first-100 row binary run → `results_100.csv` |
+| `run_eval_3class.py` | Step 2b script — the *same* first 100 rows re-scored with the 3-class prompt (like-for-like comparison for section 1) → `results_100_3class.csv`, `outputs/first100_3class_raw.jsonl` |
 | `run_balanced.py` | Step 6 script — seeded balanced 3-class + emotion run → `results_balanced.csv`, `outputs/balanced_raw.jsonl`, `outputs/dataset_stats.json` |
 | `nrc_emotions.py` | Step 5 word-list script — NRC lexicon scoring → `outputs/emotions_*.csv` |
 | `make_dashboard.py` | Dashboard generator → `dashboard.html` |
@@ -301,11 +318,17 @@ link above); `run_balanced.py` reads it from the working directory.
 curl -L -o Gift_Cards.jsonl.gz \
   "https://mcauleylab.ucsd.edu/public_datasets/data/amazon_2023/raw/review_categories/Gift_Cards.jsonl.gz"
 
-# 2. Python env (Linux/macOS: python3 -m venv .venv && source .venv/bin/activate)
-uv venv .venv && uv pip install --python .venv/Scripts/python.exe -r requirements.txt
+# 2. Python env — either works; then activate it before the python commands below.
+uv venv .venv && uv pip install -r requirements.txt
+#   (classic: python -m venv .venv, then pip install -r requirements.txt;
+#    activate with  .venv/bin/activate  on Linux/macOS or  .venv\Scripts\activate  on Windows)
 
 # 3. Step 2: first-100 binary run
-python run_eval.py                # Windows venv: .venv/Scripts/python.exe run_eval.py
+python run_eval.py
+
+# 3b. Step 2b: same 100 rows re-scored with the 3-class prompt (for the
+#     like-for-like comparison in section 1). Resumable like run_balanced.py.
+python run_eval_3class.py
 
 # 4. Step 6: balanced 3-class + emotion run (calls the class LLM endpoint).
 #    Resumable: re-running skips completed rows and rebuilds the CSV safely.
@@ -314,6 +337,10 @@ python run_balanced.py --seed 6418 --per-class 50 --workers 4
 # 5. Step 5: NRC word-list emotions
 python nrc_emotions.py
 
-# 6. Step 3/4/7: rebuild the dashboard
+# 6. Step 3/4/7: rebuild the dashboard (reads results_balanced/100/100_3class)
 python make_dashboard.py
 ```
+
+**Endpoint key:** the scripts default to the class-provided API key (`6418`). To run
+without hardcoding it, export `MBAX6418_API_KEY` before step 3 — the classifier
+reads it via `os.environ.get("MBAX6418_API_KEY", "6418")`.

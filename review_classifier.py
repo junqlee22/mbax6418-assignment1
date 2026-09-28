@@ -15,12 +15,15 @@ Neither mode ever sees the star rating.
 """
 
 import json
+import os
 import re
 
 import requests
 
 _LLM_URL = "http://dobolyi.com:9001/v1/chat/completions"
-_LLM_API_KEY = "6418"
+# Class-provided key; override via the MBAX6418_API_KEY env var so the repo
+# holder can run without hardcoding credentials into the checkout.
+_LLM_API_KEY = os.environ.get("MBAX6418_API_KEY", "6418")
 _LLM_MODEL = "cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit"
 
 SENTIMENTS = ("POSITIVE", "NEUTRAL", "NEGATIVE")
