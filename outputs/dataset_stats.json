@@ -1,0 +1,17 @@
+{
+  "total_reviews": 152410,
+  "seed": 6418,
+  "per_class_target": 50,
+  "rating_counts": {
+    "1.0": 12326,
+    "2.0": 1873,
+    "3.0": 3271,
+    "4.0": 6692,
+    "5.0": 128248
+  },
+  "class_counts": {
+    "POSITIVE": 134940,
+    "NEGATIVE": 14199,
+    "NEUTRAL": 3271
+  }
+}

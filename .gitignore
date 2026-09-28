@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Other project (not part of this assignment's repo)
+pizza930/
+
+# Data file — large, re-downloadable (see README for the source URL)
+Gift_Cards.jsonl
+Gift_Cards.jsonl.gz
+
+# NRC lexicon archive (extracted .txt IS committed for reproducibility)
+data/NRC-Emotion-Lexicon.zip
