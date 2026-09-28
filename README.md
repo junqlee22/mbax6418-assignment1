@@ -235,11 +235,15 @@ used for the word-list emotion detector:
   100 rows in order (also fixed).
 - **Fixed model settings:** temperature 0, model `cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit`.
 - **Honesty note on determinism:** the balanced run was executed twice
-  independently; overall accuracy was **77.3% (116/150) both times**, but two or
-  three borderline ★3 reviews flip class between runs (~2% of the sample), so a
-  few per-class cells in the confusion matrix can shift by one or two counts if
-  you re-run. All numbers in this report come from the committed snapshot
-  (`results_balanced.csv`).
+  independently with the same seed and settings. Overall accuracy was
+  **77.3% (116/150) both times** and the sample was identical, but the served
+  model is not bit-for-bit deterministic: exactly **2 of 150 sentiment labels**
+  changed between the runs — a bland ★5 review ("gift card") flipped
+  NEUTRAL→POSITIVE and a mild-complaint ★3 review flipped NEUTRAL→NEGATIVE —
+  and **11 of 150 (7.3%) primary-emotion labels** moved as well (joy 49→51,
+  trust 19→16, sadness 8→9). A few confusion-matrix cells can therefore shift
+  by one or two counts if you re-run; all numbers in this report come from the
+  committed snapshot (`results_balanced.csv`).
 - **Saved artifacts** (committed): raw API responses — the model's verbatim
   output per review (`outputs/balanced_raw.jsonl`), parsed results
   (`results_*.csv`), NRC-scored emotions (`outputs/emotions_*.csv`), data
