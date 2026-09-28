@@ -142,32 +142,44 @@ words at all.
 
 ## 4 · Bugs and issues hit along the way (and how they were worked around)
 
-- **Python environment had no `requests`/`pip` in the project venv** (a `uv`-created
-  minimal venv), so the classifier couldn't run at first.
-  *Workaround: installed `requests` into the venv with `uv pip install`, and used the
-  same venv for everything (pandas, Pillow).*
-- **`outputs/` directory missing at first run** — the balanced-run script crashed
-  writing `dataset_stats.json`.
-  *Workaround: the script now creates its own output directory (`os.makedirs`).*
-- **Dashboard rendered half-empty** — the hero tiles drew, but all charts and the
-  table were blank ("Showing 0 of 0 reviews"). Root cause: the JS looked up a stats
-  element by `getElementById` that was actually a *class* in the HTML, so the first
-  statement after the tiles threw a `TypeError` and the rest of the page never
-  rendered. This was caught by rendering the page to a full-page PNG and reviewing
-  it visually, then confirmed against the browser console.
-  *Workaround: fixed the element id; the generator now also prints every headline
-  number (accuracy, recall, precision, confusion, emotion agreement) in Python so
-  the page can be cross-checked against the saved output.*
-- **Analysis bug: pandas `NaN` vs empty-string comparison** — early emotion-agreement
-  counting inflated NRC coverage to 100% because `""` was read back as `NaN`.
-  *Workaround: `fillna('')` before comparing; the corrected agreement is 16/121 = 13.2%.*
-- **Minor data-format issue**: the star-rating keys in the dataset-stats JSON were
-  serialised as `"1.0"` strings, breaking an `int()` conversion in the dashboard
-  generator. *Workaround: parse with `int(float(k))`.*
-- **Process note**: interactive testing of the dashboard (filters, counts, sort,
-  row expansion, theme switch) was automated with Playwright — every filter count
-  was checked against the recorded CSVs (e.g. mismatch filter = 34 rows =
-  150 − 116; first-100 mismatch filter = 3 rows), catching zero regressions.
+Several things slowed me down while building this, mostly small but instructive.
+
+**1. The Python environment was broken out of the box.** The project venv I was
+given had no `requests` (or even `pip`) installed, so the classifier module
+wouldn't even import. I installed `requests` via `uv` and used that same venv
+for everything else, including pandas.
+
+**2. The first run crashed on a missing folder.** My balanced-run script tried
+to write `outputs/dataset_stats.json` before the folder existed. Rather than
+patching it by hand, I made the script create its own output directory — the
+fix is in the script so anyone re-running it won't trip on the same thing.
+
+**3. The dashboard rendered half-empty and I almost missed it.** The hero tiles
+drew fine, but every chart and the whole table were blank ("Showing 0 of
+0 reviews"). The cause was a one-line JavaScript bug: I looked up a stats
+element with `getElementById` that was actually a CSS class in the HTML, so the
+script threw right after the tiles and the rest of the page never rendered. I
+caught it by rendering the page to a full-page screenshot and reviewing it
+visually, which is exactly the kind of check the assignment warns about —
+numbers on the page should be verified in the browser, not assumed.
+
+**4. A pandas gotcha corrupted my first emotion analysis.** Empty strings were
+read back as `NaN`, so my agreement calculation reported NRC coverage as 100%
+when it was really 80.7%. Fixing it (`fillna('')`) changed the final
+emotion-agreement number to 16/121 = 13.2%.
+
+**5. A small data-format quirk in my own pipeline.** The star-rating counts
+were serialised as strings like `"1.0"`, which broke an `int()` conversion in
+the dashboard generator; parsing with `int(float(k))` fixed it.
+
+**6. Verification discipline paid off.** Instead of checking the dashboard by
+eye, I scripted a browser test (Playwright) that clicked through every filter
+and counted the visible rows: the mismatch filter shows exactly 34 rows on the
+balanced run, and the first-100 mismatch filter shows exactly 3. At least one
+apparent "bug" I thought I found — filter counts that didn't add up — turned
+out to be my test itself counting the confusion-matrix table's rows as if they
+were review rows. That was a good reminder to check the measurement before
+blaming the thing being measured.
 
 ---
 
