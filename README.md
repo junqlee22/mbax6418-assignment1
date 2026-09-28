@@ -193,6 +193,20 @@ out to be my test itself counting the confusion-matrix table's rows as if they
 were review rows. That was a good reminder to check the measurement before
 blaming the thing being measured.
 
+**7. A careful re-run exposed a bug in my own resume logic.** My balanced-run
+script skips reviews whose results are already saved in the raw output file
+(the run is resumable). What I missed: when *everything* was already done, the
+final CSV was rebuilt from the in-memory results — which were empty — instead
+of reading the saved predictions back. Following my own README instructions a
+second time would have wiped `results_balanced.csv` to blank predictions and
+crashed the accuracy summary on a division by zero. A reviewer caught this
+before I did. I fixed it so completed rows are restored from the raw output
+file, and verified the fix: re-running with all 150 rows cached makes **zero**
+API calls and regenerates an identical CSV. The same review also spotted a
+missing `import time` that would only ever crash on the API retry path — my run
+had zero errors, so I never hit it. Lesson: the path you test is the happy
+path; the path your README sends someone else down may not be.
+
 ---
 
 ## Data
