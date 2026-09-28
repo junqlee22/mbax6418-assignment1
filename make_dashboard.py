@@ -505,13 +505,17 @@ function stack(el, segs, labelsEl){
   const total = segs.reduce((a,s)=>a+s.v,0);
   const html = segs.map(s=>{
     const w = total===0 ? 0 : s.v/total*100;
-    return `<div class="seg ${s.v===0?"empty-seg":""}" style="width:${w}%;background:${s.c}">
-      ${s.v>0 && w>=8 ? s.label+" "+s.v : ""}</div>`;
+    const pctTxt = total===0 ? "" : " " + (s.v/total*100).toFixed(1) + "%";
+    return `<div class="seg ${s.v===0?"empty-seg":""}" style="width:${w}%;background:${s.c}"
+      title="${s.name}: ${s.v.toLocaleString()}${pctTxt}">
+      ${s.v>0 && w>=12 ? s.label+" "+s.v.toLocaleString() : ""}</div>`;
   }).join("");
   el.innerHTML = html;
   if(labelsEl){
-    labelsEl.innerHTML = segs.filter(s=>s.v>0).map(s=>
-      `<span><b style="color:${s.c}">${s.v}</b> ${s.name}</span>`).join("");
+    labelsEl.innerHTML = segs.filter(s=>s.v>0).map(s=>{
+      const pct = total===0 ? "" : ` (${(s.v/total*100).toFixed(1)}%)`;
+      return `<span><b style="color:${s.c}">${s.v.toLocaleString()}</b> ${s.name}${pct}</span>`;
+    }).join("");
   }
 }
 const dsTotal = STATS.total;
@@ -561,7 +565,7 @@ CLASSES.forEach(c=>{
   const recN = BAL.filter(r=>r.gt===c).length;
   const prec = BAL.filter(r=>r.pred===c && r.correct).length;
   const precN = BAL.filter(r=>r.pred===c).length;
-  const bar = (v,n,color)=>`<div class="bar-track small"><div class="fill tiny" style="width:${n===0?0:Math.max(2,v/n*100)}%;background:${color}" title="${v}/${n}"></div></div>`;
+  const bar = (v,n,color)=>`<div class="bar-track small">${v===0?"":`<div class="fill tiny" style="width:${Math.max(2,v/n*100)}%;background:${color}" title="${v}/${n}"></div>`}</div>`;
   feat.innerHTML += `<div class="feat-row">
     <div class="cls">${c}</div>
     <div class="feat-col"><div class="fc-label">recall ${fmtPct(rec,recN)}</div>${bar(rec,recN,"var(--accent)")}</div>
@@ -583,19 +587,23 @@ const agreeN = BAL.filter(r=>r.nrc_emo!=="—" && r.llm_emo===r.nrc_emo).length;
 const maxLLM = Math.max(...EMO.map(e=>llmC[e]));
 const maxNRC = Math.max(...EMO.map(e=>nrcC[e]));
 
-function emoBars(el, counts, max, textColor){
+function emoBars(el, counts, max){
   el.innerHTML = EMO.map(e=>{
     const v = counts[e];
+    const w = v===0 ? 0 : Math.max(2.5, v/max*100);
     return `<div class="emo-row">
       <div class="e"><i style="background:${EMO_COLORS[e]}"></i>${e}</div>
-      <div class="bar-track"><div class="fill tiny" style="width:${max===0?0:Math.max(2.5,v/max*100)}%;background:${EMO_COLORS[e]}" title="${v}"></div></div>
+      <div class="bar-track">${w>0?`<div class="fill tiny" style="width:${w}%;background:${EMO_COLORS[e]}" title="${v}"></div>`:""}</div>
       <div class="en">${v}</div></div>`;
   }).join("");
 }
 emoBars($("llmEmoBars"), llmC, maxLLM);
 emoBars($("nrcEmoBars"), nrcC, maxNRC);
-$("nrcNoHit").innerHTML = nrcNoHitN>0 ?
-  `<div class="callout info">NRC assigned no emotion to <b>${nrcNoHitN}/150</b> reviews (${(nrcNoHitN/150*100).toFixed(1)}%) — no word in the review matched the lexicon.</div>` : "";
+const avgHits = BAL.reduce((a,r)=>a+(r.nrc_hits||0),0)/BAL.length;
+$("nrcNoHit").innerHTML =
+  `<div class="callout info">NRC assigned no emotion to <b>${nrcNoHitN}/150</b> reviews (${(nrcNoHitN/150*100).toFixed(1)}%) — no
+  word in the review matched the lexicon. Reviews average only <b>${avgHits.toFixed(2)}</b> lexicon-hit tokens, so one or two
+  gift-related words can dominate the whole count.</div>`;
 
 const at = $("agreeTiles");
 const mkAt = (v,l)=>`<div class="at"><div class="at-v">${v}</div><div class="at-l">${l}</div></div>`;
@@ -605,13 +613,29 @@ at.innerHTML =
   mkAt("80.7%", "NRC coverage — reviews with ≥1 lexicon hit") +
   mkAt(nrcC["anticipation"]+" vs "+llmC["anticipation"], "NRC 'anticipation' vs LLM — the biggest single divergence");
 
+// Tie-break analysis: how many NRC-answered rows ended in a score tie, and
+// how many of those the canonical tie-break resolved to anticipation.
+let nrcTies = 0, nrcTieAntic = 0;
+both.forEach(r => {
+  const sc = EMO.map(e => r.nrc[e] || 0);
+  const top = Math.max(...sc);
+  if (top > 0 && sc.filter(x => x === top).length > 1) {
+    nrcTies++;
+    if (r.nrc_emo === "anticipation") nrcTieAntic++;
+  }
+});
 $("emoDivergenceNote").innerHTML =
-`<b>Why so different (${agreeN}/${both.length} agree)?</b> The NRC list is a bag-of-words: it gives the same vote to a word
-no matter the context, so common Gift-Card vocabulary — <code>gift</code>, <code>perfect</code>, <code>star</code>,
-<code>good</code>, <code>birthday</code> — pushes <b>anticipation</b> (${nrcC["anticipation"]}/${both.length} of the reviews it
-could score), even in clearly negative texts like “gift card arrived water damaged”. The LLM reads the whole review: real
-complaints read as <b>anger</b> (${llmC["anger"]} reviews) and praise as <b>joy</b> (${llmC["joy"]} reviews), with negation
-understood. Short reviews with no emotion words (e.g. “Four Stars”) get an emotion from the LLM but none from the list.`;
+`<b>Why so different (${agreeN}/${both.length} agree)?</b> The NRC list is a bag-of-words: it scores each word in isolation.
+Words common in gift-card reviews — <code>gift</code>, <code>perfect</code>, <code>star</code>, <code>good</code>,
+<code>birthday</code> — each vote for <b>three or four emotions at once</b> (e.g. <code>gift</code> → anticipation + joy +
+surprise). Ties are therefore the norm: <b>${nrcTies}/${both.length}</b> of the reviews the lexicon could score ended with two
+or more emotions tied on top, and the fixed tie-break (canonical order, anticipation first) resolved <b>${nrcTieAntic}</b> of
+them to <b>anticipation</b> — that tie-break, not any single word "winning", is the main driver of the list's anticipation
+count. Meanwhile the words that actually carry a complaint (<code>damaged</code>, <code>broke</code>) are mostly absent from
+the lexicon, so negative texts often score nothing at all. The LLM reads the whole review, understands negation, and reports
+the strongest expressed feeling: real complaints read as <b>anger</b> (${llmC["anger"]} reviews) and praise as <b>joy</b>
+(${llmC["joy"]} reviews). Short reviews with no emotion words (e.g. “Four Stars”) get an emotion from the LLM but none from
+the list.`;
 
 /* ---------- interactive table ---------- */
 let state = {ds:"bal", verdict:"all", gt:"all", pred:"all", emo:"all", q:"", sortKey:"idx", sortAsc:true};

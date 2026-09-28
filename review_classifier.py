@@ -173,13 +173,18 @@ def _normalize_binary(raw: str) -> str:
 # --- Full mode (Steps 5-6): sentiment + primary emotion ------------------------
 
 
-def classify_full(title: str, text: str, timeout: float = 60.0) -> dict:
-    """Classify sentiment (3 classes) and primary emotion. Returns a dict.
+def classify_full(title: str, text: str, timeout: float = 60.0, return_raw: bool = False):
+    """Classify sentiment (3 classes) and primary emotion.
 
+    Returns a dict, or (dict, raw_content) when ``return_raw=True`` so the
+    caller can persist the model's verbatim output.
     Raises ValueError if the model output cannot be parsed into valid values.
     """
     raw = _call_llm(_FULL_SYSTEM_PROMPT, _build_user_message(title, text), 4096, timeout)
-    return _parse_full(raw)
+    parsed = _parse_full(raw)
+    if return_raw:
+        return parsed, raw
+    return parsed
 
 
 def _parse_full(raw: str) -> dict:

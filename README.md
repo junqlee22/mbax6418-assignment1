@@ -38,16 +38,16 @@ reviews but weak on **neutral (3-star)** ones.
 
 | Class | n | Recall | Precision |
 |---|---|---|---|
-| POSITIVE (★4–5) | 50 | 94.0% (47/50) | 87.0% (47/54) |
-| NEUTRAL (★3) | 50 | **42.0%** (21/50) | 80.8% (21/26) |
-| NEGATIVE (★1–2) | 50 | 96.0% (48/50) | 68.6% (48/70) |
+| POSITIVE (★4–5) | 50 | 96.0% (48/50) | 87.3% (48/55) |
+| NEUTRAL (★3) | 50 | **40.0%** (20/50) | 83.3% (20/24) |
+| NEGATIVE (★1–2) | 50 | 96.0% (48/50) | 67.6% (48/71) |
 
 ### Confusion matrix (rows = ground truth, columns = prediction)
 
 | GT \ Predicted | POSITIVE | NEUTRAL | NEGATIVE |
 |---|---|---|---|
-| **POSITIVE** | 47 (94%) | 3 (6%) | 0 (0%) |
-| **NEUTRAL** | 7 (14%) | 21 (42%) | 22 (44%) |
+| **POSITIVE** | 48 (96%) | 2 (4%) | 0 (0%) |
+| **NEUTRAL** | 7 (14%) | 20 (40%) | 23 (46%) |
 | **NEGATIVE** | 0 (0%) | 2 (4%) | 48 (96%) |
 
 ---
@@ -65,31 +65,31 @@ scored 97% — only 3 errors out of 100 (2 false negatives on 5★ reviews, 1 fa
 positive on a 3★ review). *The headline number was dominated by the easy class.*
 
 Balancing the sample (50 per class, fixed seed) dropped overall accuracy to **77.3%**.
-Per-class recall shows where the loss came from: NEUTRAL recall **42%** vs
-POSITIVE **94%** and NEGATIVE **96%**. The same model that appears 97% accurate is
+Per-class recall shows where the loss came from: NEUTRAL recall **40%** vs
+POSITIVE **96%** and NEGATIVE **96%**. The same model that appears 97% accurate is
 actually much weaker once every class is weighted equally.
 
 ## 2 · Where do the mistakes go — which classes get confused with which?
 
 The concrete numbers from the matrix above:
 
-- **NEUTRAL → NEGATIVE: 22/50 (44%)** — the dominant failure. 3-star reviews whose
+- **NEUTRAL → NEGATIVE: 23/50 (46%)** — the dominant failure. 3-star reviews whose
   text is a mild complaint ("Could not use", "Why don't you include the amount?!",
   "Disappointed in the bent tin.") are pushed into the negative class.
 - **NEUTRAL → POSITIVE: 7/50 (14%)** — mild-praise 3★ reviews ("Good value",
   "Attractive box and good gift for friends", "Oh boy!") are called positive.
   So ★3 reviews collapse in **both** directions, but roughly **3× more often into
-  NEGATIVE (22) than into POSITIVE (7)**.
-- **POSITIVE → NEUTRAL: 3/50 (6%)** — short, non-effusive ★5 reviews ("Gift card",
-  "Gift cards are neat", "Pretty") get downgraded to neutral.
+  NEGATIVE (23) than into POSITIVE (7)**.
+- **POSITIVE → NEUTRAL: 2/50 (4%)** — short, non-effusive ★5 reviews ("Gift cards
+  are neat", "Pretty") get downgraded to neutral.
 - **NEGATIVE → NEUTRAL: 2/50 (4%)** — real complaints expressed mildly
   ("These are handy… Not very…", "One Star") get softened to neutral.
 - No POSITIVE ↔ NEGATIVE confusion at all in the balanced run: the model never
   mistakes strong praise for strong complaint or vice versa.
 
-The model's neutral class exists but is under-used as a target: 70 reviews were
+The model's neutral class exists but is under-used as a target: 71 reviews were
 predicted NEGATIVE overall (vs 50 true), so the model over-commits to negative
-when it is unsure — precision for NEGATIVE is consequently lower (**68.6%**).
+when it is unsure — precision for NEGATIVE is consequently lower (**67.6%**).
 
 ## 3 · How do the LLM's emotions and the word list's emotions differ, and why?
 
@@ -103,7 +103,8 @@ Two independent emotion detectors were run over the same 150 balanced reviews:
    (ties broken by canonical order).
 
 **Agreement was low: 16/121 = 13.2%** of the reviews where the lexicon produced an
-answer (the lexicon found no emotion word at all in **29/150 reviews, 20% coverage gap**).
+answer (the lexicon found no emotion word at all in **29/150 reviews — a 19.3%
+coverage gap**).
 
 The distributions (per 150 reviews):
 
@@ -113,22 +114,33 @@ The distributions (per 150 reviews):
 | anticipation | 2 | **77** |
 | disgust | 0 | 1 |
 | fear | 1 | 3 |
-| joy | **49** | 12 |
-| sadness | 8 | 3 |
+| joy | **51** | 12 |
+| sadness | 9 | 3 |
 | surprise | 6 | 1 |
-| trust | 19 | 12 |
+| trust | 16 | 12 |
 
 The biggest divergence is anticipation (77 vs 2). Why:
 
-- **NRC is a bag-of-words.** It scores each word in isolation and sums votes. Gift-Card
-  vocabulary is saturated with words the lexicon links to *anticipation* —
-  `gift`, `perfect`, `star`, `good`, `birthday` all carry anticipation associations —
-  so a negative review like *"gift card arrived water damaged"* still ends up as
-  anticipation because the word *gift* outvotes *damaged*. The lexicon also cannot
-  see negation or sarcasm ("nothing to show", "worthless" + positive body).
+- **NRC is a bag-of-words that ties constantly.** It scores each word in isolation
+  and sums votes, and the words that dominate gift-card reviews are *polysemous in
+  the lexicon*: `gift`, `perfect`, `star`, `good` and `birthday` each carry **three
+  or four emotion associations at once** (e.g. `gift` → anticipation + joy +
+  surprise). So a single gift-y word ties the top of the score table all by itself.
+  Counting the saved results: of the **121** reviews the lexicon could score,
+  **77 ended in a tie** between two or more emotions, and the fixed tie-break
+  (canonical emotion order, anticipation first) resolved **60 of those 77** to
+  anticipation. That tie-break — not one word "outvoting" another — is the main
+  driver of the NRC anticipation count. (My first draft explained this as
+  *"gift outvotes damaged"*; that was wrong — `damaged` isn't in the lexicon at
+  all, and only `gift` scores in a review like *"gift card arrived water damaged"*.)
+- **The words that carry complaints are mostly absent from the lexicon.** The verbs
+  and adjectives used in negative reviews (`damaged`, `never`, `works`) are lexical
+  gaps, so a negative text often scores nothing where a gift-y word scores three
+  emotions at once. The lexicon also cannot see negation or sarcasm ("nothing to
+  show", "worthless" + positive body).
 - **LLM reads the whole context.** It weighs all clauses, understands negation, and
   labels by the *strongest expressed feeling*: real complaints come out as anger (65),
-  praise as joy (49) — including in reviews where a single gift-y word would dominate
+  praise as joy (51) — including in reviews where a single gift-y word would dominate
   a word count.
 - **Short reviews with no emotion words** (e.g. "Four Stars", "Ease of use.") get an
   emotion from the LLM but **no emotion at all from the lexicon** (coverage 80.7%,
@@ -208,10 +220,17 @@ used for the word-list emotion detector:
   150 reviews (50 per class) every run; the first-100 run reads the file's first
   100 rows in order (also fixed).
 - **Fixed model settings:** temperature 0, model `cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit`.
-- **Saved artifacts** (committed): raw API responses
-  (`outputs/balanced_raw.jsonl`), parsed results (`results_*.csv`), NRC-scored
-  emotions (`outputs/emotions_*.csv`), data distribution
-  (`outputs/dataset_stats.json`), and the generated dashboard (`dashboard.html`).
+- **Honesty note on determinism:** the balanced run was executed twice
+  independently; overall accuracy was **77.3% (116/150) both times**, but two or
+  three borderline ★3 reviews flip class between runs (~2% of the sample), so a
+  few per-class cells in the confusion matrix can shift by one or two counts if
+  you re-run. All numbers in this report come from the committed snapshot
+  (`results_balanced.csv`).
+- **Saved artifacts** (committed): raw API responses — the model's verbatim
+  output per review (`outputs/balanced_raw.jsonl`), parsed results
+  (`results_*.csv`), NRC-scored emotions (`outputs/emotions_*.csv`), data
+  distribution (`outputs/dataset_stats.json`), and the generated dashboard
+  (`dashboard.html`).
 - Every number quoted in this report is a figure you can re-derive from those files.
 
 ## Repository layout
@@ -224,6 +243,7 @@ used for the word-list emotion detector:
 | `run_balanced.py` | Step 6 script — seeded balanced 3-class + emotion run → `results_balanced.csv`, `outputs/balanced_raw.jsonl`, `outputs/dataset_stats.json` |
 | `nrc_emotions.py` | Step 5 word-list script — NRC lexicon scoring → `outputs/emotions_*.csv` |
 | `make_dashboard.py` | Dashboard generator → `dashboard.html` |
+| `requirements.txt` | Python dependencies (`requests`, `pandas`) |
 | `dashboard.html` | Final self-contained dashboard (opened directly in a browser) |
 | `results_*.csv`, `outputs/`, `screenshots/` | Saved outputs and report figures |
 | `data/NRC-Emotion-Lexicon-Wordlevel-v0.92.txt` | Word-list lexicon (committed for offline reproducibility) |
@@ -238,18 +258,19 @@ link above); `run_balanced.py` reads it from the working directory.
 curl -L -o Gift_Cards.jsonl.gz \
   "https://mcauleylab.ucsd.edu/public_datasets/data/amazon_2023/raw/review_categories/Gift_Cards.jsonl.gz"
 
-# 2. Python env (requests + pandas)
-uv venv .venv && uv pip install --python .venv/Scripts/python.exe requests pandas
+# 2. Python env (Linux/macOS: python3 -m venv .venv && source .venv/bin/activate)
+uv venv .venv && uv pip install --python .venv/Scripts/python.exe -r requirements.txt
 
 # 3. Step 2: first-100 binary run
-.venv/Scripts/python.exe run_eval.py
+python run_eval.py                # Windows venv: .venv/Scripts/python.exe run_eval.py
 
-# 4. Step 6: balanced 3-class + emotion run (calls the class LLM endpoint)
-.venv/Scripts/python.exe run_balanced.py --seed 6418 --per-class 50 --workers 4
+# 4. Step 6: balanced 3-class + emotion run (calls the class LLM endpoint).
+#    Resumable: re-running skips completed rows and rebuilds the CSV safely.
+python run_balanced.py --seed 6418 --per-class 50 --workers 4
 
 # 5. Step 5: NRC word-list emotions
-.venv/Scripts/python.exe nrc_emotions.py
+python nrc_emotions.py
 
 # 6. Step 3/4/7: rebuild the dashboard
-.venv/Scripts/python.exe make_dashboard.py
+python make_dashboard.py
 ```

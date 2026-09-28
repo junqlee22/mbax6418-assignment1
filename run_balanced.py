@@ -7,12 +7,14 @@ Pipeline:
     random seed so the same set comes up every run.
  4. Classify each with classify_full() (3-class sentiment + one of 8 emotions).
     The rating is NEVER sent to the model -- only title + text.
- 5. Save outputs/balanced_raw.jsonl (raw API responses) and
-    results_balanced.csv (parsed results), plus outputs/dataset_stats.json
-    (whole-file rating/class distribution used by the dashboard).
+ 5. Save outputs/balanced_raw.jsonl (one line per review: the model's verbatim
+    output plus the parsed labels), results_balanced.csv (parsed results), and
+    outputs/dataset_stats.json (whole-file rating/class distribution).
  6. Print confusion matrix and per-class metrics.
 
-Resumable: sample ids already present in the raw output file are skipped.
+Resumable and idempotent: sample ids already present in the raw output file
+are skipped (no API calls), and the CSV is rebuilt from the raw file without
+losing previously completed rows.
 """
 
 import argparse
@@ -22,6 +24,7 @@ import json
 import os
 import random
 import threading
+import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -84,18 +87,47 @@ def pick_balanced_sample(reviews: list[dict], per_class: int, seed: int) -> list
     return sample
 
 
+def load_done(raw_path: str) -> dict[int, dict]:
+    """Read previously stored rows: file_index -> {"raw", "prediction"}."""
+    done: dict[int, dict] = {}
+    try:
+        with open(raw_path, encoding="utf-8") as f:
+            for line in f:
+                obj = json.loads(line)
+                done[int(obj["file_index"])] = obj
+    except FileNotFoundError:
+        pass
+    return done
+
+
 def classify_one(review: dict, timeout: float = 90.0) -> dict:
-    """Classify one review; returns dict with prediction fields or error."""
+    """Classify one review; returns prediction fields plus raw model output.
+
+    On repeated failure returns an entry flagged with ``error`` (empty labels)
+    so the run stays transparent instead of silently defaulting.
+    """
     last_err = None
     for attempt in range(RETRIES):
         try:
-            result = classify_full(review["title"], review["text"], timeout=timeout)
-            return {"predicted": result["sentiment"], "emotion_llm": result["emotion"]}
+            parsed, raw = classify_full(
+                review["title"], review["text"], timeout=timeout, return_raw=True
+            )
+            return {
+                "predicted": parsed["sentiment"],
+                "emotion_llm": parsed["emotion"],
+                "raw": raw,
+                "error": "",
+            }
         except Exception as e:  # noqa: BLE001
             last_err = e
             if attempt < RETRIES - 1:
                 time.sleep(1.5 * (attempt + 1))
-    return {"predicted": "", "emotion_llm": "", "error": repr(last_err)}
+    return {
+        "predicted": "",
+        "emotion_llm": "",
+        "raw": "",
+        "error": repr(last_err),
+    }
 
 
 def main() -> None:
@@ -128,15 +160,9 @@ def main() -> None:
     sample = pick_balanced_sample(reviews, args.per_class, args.seed)
     print(f"classified sample size: {len(sample)}")
 
-    # Resume: sample ids already in the raw file.
-    done_ids: set[int] = set()
-    try:
-        with open(RAW_OUT, encoding="utf-8") as f:
-            for line in f:
-                done_ids.add(json.loads(line)["file_index"])
-    except FileNotFoundError:
-        pass
-    todo = [r for r in sample if r["file_index"] not in done_ids]
+    # Resume: sample ids already stored in the raw file are not re-requested.
+    existing = load_done(RAW_OUT)
+    todo = [r for r in sample if r["file_index"] not in existing]
     print(f"already done: {len(sample) - len(todo)}  to classify: {len(todo)}")
 
     lock = threading.Lock()
@@ -149,7 +175,15 @@ def main() -> None:
             with open(RAW_OUT, "a", encoding="utf-8") as f:
                 f.write(
                     json.dumps(
-                        {"file_index": review["file_index"], "prediction": pred},
+                        {
+                            "file_index": review["file_index"],
+                            "raw": pred.get("raw", ""),
+                            "prediction": {
+                                "predicted": pred.get("predicted", ""),
+                                "emotion_llm": pred.get("emotion_llm", ""),
+                                "error": pred.get("error", ""),
+                            },
+                        },
                         ensure_ascii=False,
                     )
                     + "\n"
@@ -160,22 +194,27 @@ def main() -> None:
         return {**review, **pred}
 
     results: list[dict] = []
-    with ThreadPoolExecutor(max_workers=args.workers) as ex:
-        futures = [ex.submit(handle, r) for r in todo]
-        for fut in as_completed(futures):
-            try:
-                results.append(fut.result())
-            except Exception as e:  # noqa: BLE001
-                print("worker failure:", e)
+    if todo:
+        with ThreadPoolExecutor(max_workers=args.workers) as ex:
+            futures = [ex.submit(handle, r) for r in todo]
+            for fut in as_completed(futures):
+                try:
+                    results.append(fut.result())
+                except Exception as e:  # noqa: BLE001
+                    print("worker failure:", e)
 
-    # Reconcile: rows already classified (from resume) + fresh results.
+    # Reconcile fresh results with previously completed rows from the raw file,
+    # so a resume never wipes or empties the CSV.
     fresh = {r["file_index"]: r for r in results}
     all_rows = []
     for r in sample:
         row = fresh.get(r["file_index"])
         if row is None:
-            # previously completed: read back from raw file
-            pred = {"predicted": "", "emotion_llm": "", "error": "missing"}
+            rec = existing.get(r["file_index"])
+            if rec is None:
+                pred = {"predicted": "", "emotion_llm": "", "error": "missing"}
+            else:
+                pred = rec.get("prediction", {})
         else:
             pred = row
         all_rows.append(
@@ -213,6 +252,9 @@ def main() -> None:
     n = len(ok)
     correct = sum(r["correct"] for r in ok)
     print("=" * 64)
+    if n == 0:
+        print("no successfully classified rows -- check API access / errors")
+        return
     print(f"classified={n}  correct={correct}  accuracy={correct / n * 100:.2f}%")
     gt = Counter(r["ground_truth"] for r in ok)
     for cls in ("POSITIVE", "NEUTRAL", "NEGATIVE"):
