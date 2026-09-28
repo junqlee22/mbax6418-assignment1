@@ -154,7 +154,14 @@ words at all.
 
 ## 4 · Bugs and issues hit along the way (and how they were worked around)
 
-Several things slowed me down while building this, mostly small but instructive.
+I built this project with an LLM coding agent, and the honest record is that it
+was **not** finished in one pass. The first version that looked complete still
+had real problems: some I hit while building, some appeared when I re-ran the
+project, and some only surfaced when the submitted work was reviewed. Fixing
+them took several rounds of conversation with the agent, and each round left a
+visible trace in the repository history. This is the actual list, in order.
+
+**Build phase — the first pass.**
 
 **1. The Python environment was broken out of the box.** The project venv I was
 given had no `requests` (or even `pip`) installed, so the classifier module
@@ -172,7 +179,7 @@ drew fine, but every chart and the whole table were blank ("Showing 0 of
 element with `getElementById` that was actually a CSS class in the HTML, so the
 script threw right after the tiles and the rest of the page never rendered. I
 caught it by rendering the page to a full-page screenshot and reviewing it
-visually, which is exactly the kind of check the assignment warns about —
+visually — exactly the kind of in-browser check the assignment warns about:
 numbers on the page should be verified in the browser, not assumed.
 
 **4. A pandas gotcha corrupted my first emotion analysis.** Empty strings were
@@ -183,6 +190,8 @@ emotion-agreement number to 16/121 = 13.2%.
 **5. A small data-format quirk in my own pipeline.** The star-rating counts
 were serialised as strings like `"1.0"`, which broke an `int()` conversion in
 the dashboard generator; parsing with `int(float(k))` fixed it.
+
+**Verification round — checking the work, then checking it again.**
 
 **6. Verification discipline paid off.** Instead of checking the dashboard by
 eye, I scripted a browser test (Playwright) that clicked through every filter
@@ -199,13 +208,29 @@ script skips reviews whose results are already saved in the raw output file
 final CSV was rebuilt from the in-memory results — which were empty — instead
 of reading the saved predictions back. Following my own README instructions a
 second time would have wiped `results_balanced.csv` to blank predictions and
-crashed the accuracy summary on a division by zero. A reviewer caught this
-before I did. I fixed it so completed rows are restored from the raw output
-file, and verified the fix: re-running with all 150 rows cached makes **zero**
-API calls and regenerates an identical CSV. The same review also spotted a
-missing `import time` that would only ever crash on the API retry path — my run
-had zero errors, so I never hit it. Lesson: the path you test is the happy
-path; the path your README sends someone else down may not be.
+crashed the accuracy summary on a division by zero — this was flagged when the
+submitted version came back under review. I fixed it so completed rows are
+restored from the raw output file, and verified the fix: re-running with all
+150 rows cached makes **zero** API calls and regenerates an identical CSV. The
+same review also spotted a missing `import time` that would only ever crash on
+the API retry path — my run had zero errors, so I never hit it. Lesson: the
+path you test is the happy path; the path your README sends someone else down
+may not be.
+
+**Final round — making the report match the data exactly.**
+
+**8. The report needed two more corrections.** First, my original Q3
+explanation said the word "gift" simply *outvotes* "damaged" in the lexicon
+comparison — but `damaged` is not in the NRC lexicon at all. Counting the saved
+results showed the real mechanism: 77 of the 121 scorable reviews ended in a
+tie between two or more emotions, and the canonical tie-break (anticipation
+first) resolved 60 of those to anticipation. The report and the dashboard now
+say precisely this. Second, the reproducibility claim needed precision: the
+served model is not bit-for-bit deterministic — two runs with the same seed
+both scored 77.3%, but exactly 2 of 150 sentiment labels and 11 of 150 emotion
+labels differed between them, so the report states that explicitly instead of
+implying the numbers are more stable than they are. I also removed a stale
+screenshot that still showed the pre-fix numbers.
 
 ---
 
